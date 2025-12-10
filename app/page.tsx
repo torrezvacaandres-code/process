@@ -1,29 +1,65 @@
 'use client';
 
 import { useState } from 'react';
-import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { processExcelFile, exportToExcel, type ProcessedRow } from '@/lib/excelProcessor';
 
+interface ProcessedFile {
+  file: File;
+  data: ProcessedRow[];
+  processed: boolean;
+}
+
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
   const [processing, setProcessing] = useState(false);
-  const [processedData, setProcessedData] = useState<ProcessedRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length > 0) {
+      setFiles(prev => [...prev, ...selectedFiles]);
       setError(null);
-      setProcessedData(null);
+    }
+    // Resetear el input para permitir seleccionar el mismo archivo nuevamente
+    e.target.value = '';
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+    // También remover de procesados si existe
+    setProcessedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleProcessFile = async (file: File, index: number) => {
+    setProcessing(true);
+    setError(null);
+
+    try {
+      const result = await processExcelFile(file);
+      setProcessedFiles(prev => {
+        const newProcessed = [...prev];
+        newProcessed[index] = {
+          file,
+          data: result,
+          processed: true
+        };
+        return newProcessed;
+      });
+    } catch (err) {
+      setError(`Error al procesar ${file.name}: ${err instanceof Error ? err.message : 'Error desconocido'}`);
+      console.error(err);
+    } finally {
+      setProcessing(false);
     }
   };
 
-  const handleProcess = async () => {
-    if (!file) {
-      setError('Por favor selecciona un archivo');
+  const handleProcessAll = async () => {
+    if (files.length === 0) {
+      setError('Por favor selecciona al menos un archivo');
       return;
     }
 
@@ -31,10 +67,19 @@ export default function Home() {
     setError(null);
 
     try {
-      const result = await processExcelFile(file);
-      setProcessedData(result);
+      const results = await Promise.all(
+        files.map(file => processExcelFile(file))
+      );
+
+      setProcessedFiles(
+        files.map((file, index) => ({
+          file,
+          data: results[index],
+          processed: true
+        }))
+      );
     } catch (err) {
-      setError('Error al procesar el archivo. Verifica que tenga el formato correcto.');
+      setError('Error al procesar uno o más archivos. Verifica que tengan el formato correcto.');
       console.error(err);
     } finally {
       setProcessing(false);
@@ -42,10 +87,20 @@ export default function Home() {
   };
 
   const handleDownload = () => {
-    if (processedData) {
-      exportToExcel(processedData, 'resultado_procesado.xlsx');
+    const allData = processedFiles
+      .filter(pf => pf.processed)
+      .flatMap(pf => pf.data);
+    
+    if (allData.length > 0) {
+      exportToExcel(allData, 'resultado_procesado.xlsx');
     }
   };
+
+  const allProcessedData = processedFiles
+    .filter(pf => pf.processed)
+    .flatMap(pf => pf.data);
+  
+  const totalProcessed = processedFiles.filter(pf => pf.processed).length;
 
   return (
     <main className="min-h-screen bg-background p-8">
@@ -61,9 +116,9 @@ export default function Home() {
         {/* Upload Card */}
         <Card>
           <CardHeader>
-            <CardTitle>Cargar Archivo</CardTitle>
+            <CardTitle>Cargar Archivos</CardTitle>
             <CardDescription>
-              Selecciona el archivo Excel con los datos de pedidos a procesar
+              Selecciona uno o múltiples archivos Excel para procesar. Puedes agregar más archivos y procesarlos todos juntos.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -77,10 +132,10 @@ export default function Home() {
                     <Upload className="h-8 w-8 text-muted-foreground" />
                     <div className="space-y-1">
                       <p className="text-sm font-medium">
-                        {file ? file.name : 'Click para seleccionar archivo'}
+                        {files.length > 0 ? `${files.length} archivo(s) seleccionado(s)` : 'Click para seleccionar archivos'}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Archivo Excel (.xlsx, .xls)
+                        Archivos Excel (.xlsx, .xls) - Puedes seleccionar múltiples
                       </p>
                     </div>
                   </div>
@@ -89,28 +144,71 @@ export default function Home() {
                   id="file-upload"
                   type="file"
                   accept=".xlsx,.xls"
+                  multiple
                   onChange={handleFileChange}
                   className="hidden"
                 />
               </label>
             </div>
 
-            {file && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted p-3 rounded-md">
-                <FileSpreadsheet className="h-4 w-4" />
-                <span>{file.name}</span>
-                <span className="text-xs">({(file.size / 1024).toFixed(2)} KB)</span>
+            {files.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Archivos seleccionados ({files.length})</p>
+                  <Button
+                    onClick={handleProcessAll}
+                    disabled={processing}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {processing ? 'Procesando...' : 'Procesar Todos'}
+                  </Button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {files.map((file, index) => {
+                    const processedFile = processedFiles[index];
+                    return (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="flex items-center justify-between gap-2 text-sm bg-muted p-3 rounded-md"
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <FileSpreadsheet className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <span className="truncate">{file.name}</span>
+                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                            ({(file.size / 1024).toFixed(2)} KB)
+                          </span>
+                          {processedFile?.processed && (
+                            <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {!processedFile?.processed && (
+                            <Button
+                              onClick={() => handleProcessFile(file, index)}
+                              disabled={processing}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              Procesar
+                            </Button>
+                          )}
+                          <Button
+                            onClick={() => handleRemoveFile(index)}
+                            disabled={processing}
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
-
-            <Button
-              onClick={handleProcess}
-              disabled={!file || processing}
-              className="w-full"
-              size="lg"
-            >
-              {processing ? 'Procesando...' : 'Procesar Archivo'}
-            </Button>
 
             {error && (
               <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
@@ -122,7 +220,7 @@ export default function Home() {
         </Card>
 
         {/* Results Card */}
-        {processedData && (
+        {allProcessedData.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -130,11 +228,31 @@ export default function Home() {
                 Procesamiento Completado
               </CardTitle>
               <CardDescription>
-                Se procesaron {processedData.length} registros correctamente
+                {totalProcessed} archivo(s) procesado(s) - {allProcessedData.length} registros totales acumulados
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Preview de los primeros 5 registros */}
+              {/* Lista de archivos procesados */}
+              {processedFiles.filter(pf => pf.processed).length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Archivos procesados:</p>
+                  <div className="space-y-1">
+                    {processedFiles
+                      .filter(pf => pf.processed)
+                      .map((pf, idx) => (
+                        <div key={idx} className="text-xs text-muted-foreground bg-muted p-2 rounded flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <FileSpreadsheet className="h-3 w-3" />
+                            {pf.file.name}
+                          </span>
+                          <span>{pf.data.length} registros</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview de los primeros 10 registros */}
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted">
@@ -148,7 +266,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {processedData.slice(0, 5).map((row, index) => (
+                    {allProcessedData.slice(0, 10).map((row, index) => (
                       <tr key={index} className="hover:bg-muted/50">
                         <td className="px-4 py-3">{row.NroPedido}</td>
                         <td className="px-4 py-3">{row.item}</td>
@@ -162,9 +280,9 @@ export default function Home() {
                 </table>
               </div>
 
-              {processedData.length > 5 && (
+              {allProcessedData.length > 10 && (
                 <p className="text-xs text-muted-foreground text-center">
-                  Mostrando 5 de {processedData.length} registros
+                  Mostrando 10 de {allProcessedData.length} registros totales
                 </p>
               )}
 
@@ -172,36 +290,15 @@ export default function Home() {
                 onClick={handleDownload}
                 className="w-full"
                 size="lg"
+                disabled={allProcessedData.length === 0}
               >
                 <Download className="h-4 w-4 mr-2" />
-                Descargar Archivo Procesado
+                Descargar Archivo Procesado ({allProcessedData.length} registros)
               </Button>
             </CardContent>
           </Card>
         )}
 
-        {/* Instructions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Instrucciones</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-              <li>Selecciona el archivo Excel con los datos del pedido</li>
-              <li>Haz click en &quot;Procesar Archivo&quot;</li>
-              <li>Revisa la vista previa de los datos procesados</li>
-              <li>Descarga el archivo Excel con los resultados</li>
-            </ol>
-            <div className="mt-4 p-4 bg-muted rounded-md">
-              <p className="text-xs font-medium mb-2">Campos calculados:</p>
-              <ul className="text-xs text-muted-foreground space-y-1">
-                <li><strong>Diferencia:</strong> Valor del pedido Bs. - VALOR NETO</li>
-                <li><strong>Descuento Financiero:</strong> VALOR NETO × 3%</li>
-                <li><strong>Suma:</strong> Diferencia + Descuento Financiero</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </main>
   );
