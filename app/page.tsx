@@ -17,15 +17,57 @@ export default function Home() {
   const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length > 0) {
-      setFiles(prev => [...prev, ...selectedFiles]);
-      setError(null);
+      addFiles(selectedFiles);
     }
     // Resetear el input para permitir seleccionar el mismo archivo nuevamente
     e.target.value = '';
+  };
+
+  const addFiles = (newFiles: File[]) => {
+    const excelFiles = newFiles.filter(file => {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      return extension === 'xlsx' || extension === 'xls';
+    });
+
+    if (excelFiles.length > 0) {
+      setFiles(prev => [...prev, ...excelFiles]);
+      setError(null);
+    } else if (newFiles.length > 0) {
+      setError('Por favor selecciona solo archivos Excel (.xlsx, .xls)');
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      addFiles(droppedFiles);
+    }
   };
 
   const handleRemoveFile = (index: number) => {
@@ -126,13 +168,27 @@ export default function Home() {
               <label
                 htmlFor="file-upload"
                 className="flex-1 cursor-pointer"
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
               >
-                <div className="border-2 border-dashed border-border rounded-lg p-8 hover:bg-muted/50 transition-colors">
+                <div
+                  className={`border-2 border-dashed rounded-lg p-8 transition-colors ${
+                    isDragging
+                      ? 'border-primary bg-primary/5 border-solid'
+                      : 'border-border hover:bg-muted/50'
+                  }`}
+                >
                   <div className="flex flex-col items-center gap-2 text-center">
-                    <Upload className="h-8 w-8 text-muted-foreground" />
+                    <Upload className={`h-8 w-8 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
                     <div className="space-y-1">
-                      <p className="text-sm font-medium">
-                        {files.length > 0 ? `${files.length} archivo(s) seleccionado(s)` : 'Click para seleccionar archivos'}
+                      <p className={`text-sm font-medium ${isDragging ? 'text-primary' : ''}`}>
+                        {isDragging
+                          ? 'Suelta los archivos aquí'
+                          : files.length > 0
+                          ? `${files.length} archivo(s) seleccionado(s)`
+                          : 'Arrastra archivos aquí o click para seleccionar'}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Archivos Excel (.xlsx, .xls) - Puedes seleccionar múltiples
